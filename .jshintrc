@@ -1,0 +1,37 @@
+// a config file for jshint lint, options can still be overruled in file.
+// note self: see also notes in JS/doc
+
+{
+	/// Allow ECMAScript <NUMBER> syntax.
+	"esversion" : 11,
+
+	/// Allow debugger statements e.g. browser breakpoints.
+	"debug" : true,
+
+	/// reverse logic. These directives will enable showing warnings about undefined, unused variables.
+	"undef": true,
+	"unused": true,
+
+	/// disable warnings
+	"-W083": true, // "Functions declared within loops referencing an outer scoped variable may lead to confusing semantics."
+
+	/// globals - ignore variables which are defined upstream
+	/// false - consider that variable read-only.
+	// "globals": {
+	// }
+
+	/// predef - considers to be implicitly defined in the environment
+	"predef": [
+		// -- Web API (objects unknown to jshint for some reason)
+		"KeyboardEvent", "cookieStore", "caches",
+		// -- WebExt
+		"browser", "chrome",
+		// -- GM
+		"GM", "unsafeWindow", "GM_info", "GM_xmlhttpRequest", "GM_registerMenuCommand", "GM_unregisterMenuCommand"
+	],
+
+	/// Environments - pre-defined global variables
+	"browser": true, // window, XMLHttpRequest, DOMParser...
+	"devel": true    // console, alert
+	// "jquery": true   // $
+}

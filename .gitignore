@@ -1,0 +1,6 @@
+
+ftpsync.settings
+*.sublime-workspace
+.vscode/launch.json
+/doc-papo
+/node_modules

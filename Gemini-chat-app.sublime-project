@@ -1,0 +1,30 @@
+{
+	"build_systems":
+	[
+		{
+			"name": "Debug in Browser",
+			"shell_cmd": "PowerShell -NoExit -Command \"echo $pwd ; echo $PSScriptRoot; ./debug.ps1\"",
+		}
+	],
+	"folders":
+	[
+		{
+			"path": ".",
+			"binary_file_patterns": [
+				"*/vendor/*"
+			],
+		},
+		{
+			"name": "DOC - JS",
+			"path": "H:\\Documents\\coding\\JS",
+			"binary_file_patterns": [ "*" ],
+		},
+		{
+			"path": "H:\\Projects\\JS\\Util",
+		},
+	],
+	"settings":
+	{
+		// "tab_size": 8
+	},
+}
