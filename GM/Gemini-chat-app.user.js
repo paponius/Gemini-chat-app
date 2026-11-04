@@ -20,10 +20,9 @@
  */
 
 // ==UserScript==
-// @name           Gemini Thinking Level Switch
-// #future-name           Gemini Chat App Enhancer
+// @name           Gemini Chat App Enhancer
 // @namespace      https://github.com/paponius/
-// @version        1.14
+// @version        1.15
 // @description    Adds a clean inline thinking level switcher for Gemini with automatic state detection and customizable visibility.
 // @author         papo
 // @license        CC BY-NC-SA 4.0
@@ -33,10 +32,6 @@
 // @grant          GM_registerMenuCommand
 // @grant          GM_getValue
 // @grant          GM_setValue
-
-//// FRAMEWORKS
-// ###require      https://code.jquery.com/jquery-2.2.0.min.js
-// ###require      https://greasemonkey.github.io/gm4-polyfill/gm4-polyfill.js
 
 //// CORE APPLICATION LOGIC
 // @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/src/Gemini-chat-app.js?v0.9
