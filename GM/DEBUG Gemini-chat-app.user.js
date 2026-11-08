@@ -31,7 +31,7 @@
 // ###run-at         document-start
 //// document-start ['loading'] -> document-body [<body> exist] -> document-end ['DOMContentLoaded'/'interactive'] -> document-idle (TM default)
 
-// ###noframes
+// @noframes
 
 
 //// REQUIRE directives. Make it identical to production version of the US. Replace with file:// those which will be edited in IDE.
@@ -42,8 +42,10 @@
 // ###require        https://code.jquery.com/jquery-2.2.0.min.js
 // ###require        http://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js
 // ###require        https://greasemonkey.github.io/gm4-polyfill/gm4-polyfill.js
+// @require        file:///H:\Projects\JS\Gemini-chat-app\src\Query-Dynamic.js
 
-// @require        file:///H:\Projects\JS\Gemini-chat-app\src\Gemini-chat-app.js
+// @require        file:///H:\Projects\JS\Gemini-chat-app\src\Gemini-Thinking-Level-Switch.js
+// @require        file:///H:\Projects\JS\Gemini-chat-app\src\Gemini-Model-Used-Badge.js
 
 //// Production version of this US
 //// Must be the last @require. Metadata block in it is ignored. No need to add if it's without JS code.

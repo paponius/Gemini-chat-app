@@ -33,7 +33,14 @@
 // @grant          GM_getValue
 // @grant          GM_setValue
 
+// @noframes
+
+// @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/GM/GM_common.js
+
+// @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/src/Query-Dynamic.js
+
 //// CORE APPLICATION LOGIC
-// @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/src/Gemini-chat-app.js?v0.9
+// @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/src/Gemini-Thinking-Level-Switch.js
+// @require        https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/src/Gemini-Model-Used-Badge.js
 
 // ==/UserScript==
