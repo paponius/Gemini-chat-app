@@ -1,5 +1,5 @@
 // ==========================================
-// SECTION: New DOM Data Observer & Debug (Part 1)
+// Gemini-Model-Used-Badge
 // ==========================================
 
 
@@ -28,57 +28,92 @@
 		document.head.appendChild(styleEl);
 	}
 
-	let isProcessingQueue = false;
-	const processingQueue = [];
+	var isProcessingQueue = false;
+	var processingQueue = [];
 
-	function initChatHistoryObserver() {
-		console.log('[Gemini-chat-app model-used] Initializing global mutation observer for response containers.');
+	function initChatHistoryObserver(rootElement) {
+        console.log('[GCA model-used] Initializing chat history observer for root element:', rootElement);
 
-		// Function to check and queue response containers anywhere in the document
-		const checkContainers = () => {
-			const containers = document.querySelectorAll('response-container');
-			containers.forEach(container => {
-				if (!container.hasAttribute('data-gls-processed')) {
-					container.setAttribute('data-gls-processed', 'queued');
-					console.log('[Gemini-chat-app model-used] Queued new response container for processing:', container);
-					processingQueue.push(container);
-				}
-			});
-			processQueue();
-		};
+        // Function to check and queue conversation containers anywhere within the root or added subtree
+        function checkContainers(target = rootElement) {
+            if (target.nodeType !== Node.ELEMENT_NODE) return;
 
-		// Run an initial check in case elements are already present
-		checkContainers();
+            // div.conversation-container, first time pending-.conversation-container is created, but is later removed
+            if (target.matches('div.conversation-container')) {
+                queueContainer(target);
+            }
 
-		// Observe document body for any dynamically added response containers (unlimited time / user action dependent)
-		const bodyObserver = new MutationObserver(() => {
-			checkContainers();
-		});
+            // redundant, if a wrapper is inserted (todo maybe should warn in console, so code is fixed)
+            const containers = target.querySelectorAll(':scope div.conversation-container');
+            containers.forEach(container => queueContainer(container));
+        }
 
-		bodyObserver.observe(document.body, { childList: true, subtree: true });
-	}
+		function queueContainer(container) {
+
+			/* gem: you can mod this comment: checks if `.response-container-footer .menu-button-wrapper gem-icon-button` is present
+			in found element. if not, queryDynamic() will be used.
+			the found element will be added to processingQueue now only if there are all necessary elements in it
+			*/
+			if (container.hasAttribute('data-gls-processed')) return;
+
+			const menuButton = container.querySelector('.response-container-footer .menu-button-wrapper gem-icon-button');
+			if (menuButton) {
+				container.setAttribute('data-gls-processed', 'queued');
+				console.log('[GCA model-used] Queued new conversation container for processing:', container);
+				processingQueue.push({ container, menuButton });
+				processQueue();
+			} else {
+				console.warn('[GCA model-used] Menu button not yet present in newly added container, waiting via queryDynamic:', container);
+				queryDynamic('.response-container-footer .menu-button-wrapper gem-icon-button', resolvedMenuButton => {
+					if (!container.hasAttribute('data-gls-processed')) {
+						container.setAttribute('data-gls-processed', 'queued');
+						console.log('[GCA model-used] Queued new conversation container for processing:', container);
+					processingQueue.push({ container, menuButton: resolvedMenuButton });
+						processQueue();
+					}
+				}, container);
+			}
+		}
+
+        // Run an initial check in case conversation containers are already present
+        checkContainers();
+
+        // Observe the root element for any dynamically added conversation containers
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) {
+                        checkContainers(node);
+                    }
+                }
+            }
+        });
+
+        observer.observe(rootElement, { childList: true, subtree: false });
+    }
 
 	async function processQueue() {
 		if (isProcessingQueue) return;
 		isProcessingQueue = true;
-		console.log('[Gemini-chat-app model-used] processQueue() started. Current queue length:', processingQueue.length);
+		console.log('[GCA model-used] processQueue() started. Current queue length:', processingQueue.length);
 
 		try {
 			while (processingQueue.length > 0) {
-				const container = processingQueue.shift();
+				const item = processingQueue.shift();
+				const container = item.container;
 				if (!document.body.contains(container)) {
-					console.log('[Gemini-chat-app model-used] Container is no longer attached to document DOM, skipping.');
+					console.log('[GCA model-used] Container is no longer attached to document DOM, skipping.');
 					continue;
 				}
 				
 				container.setAttribute('data-gls-processed', 'processing');
-				console.log('[Gemini-chat-app model-used] Processing container:', container);
+				console.log('[GCA model-used] Processing container:', container);
 				try {
-					await processSingleResponseContainer(container);
+					await processSingleResponseContainer(item);
 					container.setAttribute('data-gls-processed', 'true');
-					console.log('[Gemini-chat-app model-used] Successfully processed and marked container as true.');
+					console.log('[GCA model-used] Successfully processed and marked container as true.');
 				} catch (err) {
-					console.error('[Gemini-chat-app model-used] Error processing response container:', err);
+					console.error('[GCA model-used] Error processing response container:', err);
 					container.removeAttribute('data-gls-processed');
 				}
 				// Small breather between processing containers to prevent overlapping UI clicks
@@ -86,71 +121,66 @@
 			}
 		} finally {
 			isProcessingQueue = false;
-			console.log('[Gemini-chat-app model-used] processQueue() completed. Queue empty.');
+			console.log('[GCA model-used] processQueue() completed. Queue empty.');
 		}
 	}
 
-	async function processSingleResponseContainer(container) {
-		// Wait patiently and poll for the menu button since response-container appears before its footer buttons are fully rendered/hydrated
-		let menuButton = null;
-		for (let i = 0; i < 100; i++) {
-			menuButton = container.querySelector('.response-container-footer .menu-button-wrapper gem-icon-button');
-			if (menuButton) break;
-			await new Promise(r => setTimeout(r, 100));
-		}
+	async function processSingleResponseContainer({ container, menuButton }) {
 
-		if (!menuButton) {
-			console.log('[Gemini-chat-app model-used] Menu button (.response-container-footer .menu-button-wrapper gem-icon-button) not found after waiting in container.');
-			return;
-		}
-		console.log('[Gemini-chat-app model-used] Found menu button. Clicking to open first popup menu...');
+		console.log('[GCA model-used] Found menu button. Clicking to open first popup menu...');
 
 		// 1. Click the first popup menu trigger button
 		menuButton.click();
 
 		// 2. Wait for the first popup menu containing [data-test-id="response-details-button"] to appear
-		let detailsMenuItem = null;
-		for (let i = 0; i < 30; i++) {
-			detailsMenuItem = document.querySelector('gem-menu-item[data-test-id="response-details-button"]');
-			if (detailsMenuItem) break;
-			await new Promise(r => setTimeout(r, 50));
-		}
+		const detailsMenuItem = await new Promise(resolve => {
+			debugger;
+			queryDynamic('~ .cdk-overlay-popover > .cdk-overlay-pane > .container > gem-menu > gem-menu-item[data-test-id="response-details-button"]', menuButton, item => {
+				resolve(item);
+			});
+		});
 
 		if (!detailsMenuItem) {
-			console.error('[Gemini-chat-app model-used] Response details menu item ([data-test-id="response-details-button"]) not found after waiting.');
+			console.error('[GCA model-used] Response details menu item ([data-test-id="response-details-button"]) not found.');
 			document.body.click(); // Close any open menu
 			return;
 		}
-		console.log('[Gemini-chat-app model-used] Found response details menu item. Clicking...');
+		console.log('[GCA model-used] Found response details menu item. Clicking...');
 
 		// 3. Click the "See response details" menu item to open the second popup/sidebar
+		// gem: there is no change in detailsMenuItem and its child elements (I mean the whole partial DOM is not changed. no flag to check),
+		// when the sidebar for it is opened and there could be only one sidebar.
+		// So, there is no way to safely link a sidebar to a specific detailsMenuItem. We must be careful, probably check if the sidebar is opened prior to clicking on the detailsMenuItem
+		// keep some form of the above comment here, so we remember later what's going on
+		// at least use this selector to check if it's open: .content-container .thought-summary, and close it prior to the click if it is
+
 		detailsMenuItem.click();
 
 		// 4. Wait for the sidebar container and [data-test-id="model-line"] to appear
-		let modelLine = null;
-		for (let i = 0; i < 40; i++) {
-			modelLine = document.querySelector('context-sidebar [data-test-id="model-line"]');
-			if (modelLine) break;
-			await new Promise(r => setTimeout(r, 50));
-		}
+		// this is more detailed path. use it with queryDynamic instead of the loop below: .content-container context-sidebar > .container > .feature-container > .ng-star-inserted > .thought-summary > [data-test-id="model-line"]
+		const modelLine = await new Promise(resolve => {
+			queryDynamic('.content-container context-sidebar > .container > .feature-container > .ng-star-inserted > .thought-summary > [data-test-id="model-line"]', line => {
+				resolve(line);
+			});
+		});
 
 		if (!modelLine) {
-			console.error('[Gemini-chat-app model-used] Model line element ([data-test-id="model-line"]) not found in sidebar after waiting.');
+			console.error('[GCA model-used] Model line element ([data-test-id="model-line"]) not found in sidebar.');
 			const closeButton = document.querySelector('context-sidebar button.close-button, context-sidebar .close-button');
 			if (closeButton) closeButton.click();
 			return;
 		}
 
 		const modelText = modelLine.textContent.trim();
-		console.log('[Gemini-chat-app model-used] Successfully extracted model line text:', modelText);
+		console.log('[GCA model-used] Successfully extracted model line text:', modelText);
 
 		// 5. Close the sidebar by clicking on .close-button inside <context-sidebar>
 		const closeButton = document.querySelector('context-sidebar button.close-button, context-sidebar .close-button');
 		if (closeButton) {
-			console.log('[Gemini-chat-app model-used] Closing sidebar via close button...');
+			console.log('[GCA model-used] Closing sidebar via close button...');
 			closeButton.click();
 		} else {
-			console.log('[Gemini-chat-app model-used] Sidebar close button not found, clicking document body...');
+			console.log('[GCA model-used] Sidebar close button not found, clicking document body...');
 			document.body.click();
 		}
 
@@ -164,16 +194,18 @@
 			badge.className = 'gls-model-badge';
 			badge.textContent = modelText;
 			buttonsContainer.appendChild(badge);
-			console.log('[Gemini-chat-app model-used] Injected model badge into buttons container:', badge);
+			console.log('[GCA model-used] Injected model badge into buttons container:', badge);
 		} else {
-			console.log('[Gemini-chat-app model-used] Buttons container not found or badge already present.');
+			console.log('[GCA model-used] Buttons container not found or badge already present.');
 		}
 	}
 
 	injectStyles();
-	setTimeout(() => {
-		console.log('[Gemini-chat-app model-used] Initializing chat history observer timer triggered.');
-		initChatHistoryObserver();
-	}, 1000);
+	// setTimeout(() => {
+	// 	console.log('[GCA model-used] Initializing chat history observer timer triggered.');
+	// 	initChatHistoryObserver();
+	// }, 1000);
+
+	queryDynamic('.chat-app .content-container infinite-scroller.chat-history', initChatHistoryObserver);
 
 })();

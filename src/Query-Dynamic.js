@@ -9,7 +9,6 @@ function getElapsedTimestamp() {
 	return `+${performance.now().toFixed(2)}ms`;
 }
 
-
 // Global registry to track active query-dynamic instances and prevent duplicate runs across re-injections
 window.__queryDynamicInstances = window.__queryDynamicInstances || {};
 
@@ -50,7 +49,7 @@ function queryDynamic(complexSelector, callbackOrRoot, rootOrCallback) {
 	window.__queryDynamicInstances[complexSelector] = instance;
 
 	// Decompose the complex selector into sequential simple segments.
-	// Example: ".a .d > .target" -> [ { selector: '.a', combinator: 'descendant' }, ... ]
+	// Example: " > .b" or ".a + .b ~ .c > .target"
 	let segments = parseSelectorSegments(complexSelector);
 	console.log(getElapsedTimestamp(), '[QD] Parsed segments:', segments);
 	if (segments.length === 0) {
@@ -62,112 +61,133 @@ function queryDynamic(complexSelector, callbackOrRoot, rootOrCallback) {
 }
 
 function parseSelectorSegments(selectorStr) {
-	// Basic parser to split complex selector by combinators while preserving context.
-	// For practical robustness, we can split by spaces and handle '>' explicitly.
-	let trimmed = selectorStr.trim();
-	let tokens = trimmed.split(/\s+/);
+	if (selectorStr === '~ .cdk-overlay-popover > .cdk-overlay-pane > .container > gem-menu > gem-menu-item[data-test-id="response-details-button"]') { debugger; }
+	// Normalize spacing around combinators and filter out any empty tokens resulting from leading/trailing operators
+	let normalized = selectorStr.trim()
+		.replace(/\s*([>+~])\s*/g, ' $1 ')
+		.replace(/\s+/g, ' ');
+	let tokens = normalized.split(' ').filter(Boolean);
 	let segments = [];
-	let pendingCombinator = 'descendant';
+	let pendingCombinator = ' ';
 
 	for (let i = 0; i < tokens.length; i++) {
 		let token = tokens[i];
 
-		if (token === '>') {
-			pendingCombinator = 'child';
-			continue;
-		}
-
-		if (token.startsWith('>')) {
-			pendingCombinator = 'child';
-			token = token.substring(1);
-		}
-
-		if (token.endsWith('>')) {
-			token = token.slice(0, -1);
-			segments.push({ selector: token, combinator: pendingCombinator });
-			pendingCombinator = 'child';
+		if (token === '>' || token === '+' || token === '~') {
+			pendingCombinator = token;
 			continue;
 		}
 
 		segments.push({ selector: token, combinator: pendingCombinator });
-		pendingCombinator = 'descendant';
+		pendingCombinator = ' ';
 	}
 
 	return segments;
 }
 
-function resolveSegment(currentRoot, segments, index, callback, instance) {
-	debugger;
+function resolveSegment(prevElement, segments, index, callback, instance) {
 	let current = segments[index];
 	let isLast = index === segments.length - 1;
 
-	console.log(getElapsedTimestamp(), `[QD] Resolving segment [${index}/${segments.length - 1}]: "${current.selector}" (combinator: ${current.combinator}) inside root:`, currentRoot);
+	console.log(getElapsedTimestamp(), `[QD] Resolving segment [${index}/${segments.length - 1}]: "${current.selector}" (combinator: "${current.combinator}") relative to:`, prevElement);
 
-	// 1. Initial check: check if the root itself matches, or perform querySelector sweep
-	function findMatch(root) {
-		if (root.nodeType === Node.ELEMENT_NODE && root.matches(current.selector)) {
-			return root;
+	// 1. Initial check: evaluate based on combinator type relative to prevElement
+	function findMatch() {
+		if (index === 0) {
+			switch (current.combinator) {
+				case '>':
+					if (prevElement.nodeType === Node.ELEMENT_NODE) {
+						return prevElement.querySelector(`:scope > ${current.selector}`);
+					}
+					return null;
+				case '+':
+					{
+						let next = prevElement.nextElementSibling;
+						return next && next.matches(current.selector) ? next : null;
+					}
+				case '~':
+					{
+						let curr = prevElement.nextElementSibling;
+						while (curr) {
+							if (curr.matches(current.selector)) return curr;
+							curr = curr.nextElementSibling;
+						}
+						return null;
+					}
+				case ' ':
+				default:
+					if (prevElement.nodeType === Node.ELEMENT_NODE && prevElement.matches(current.selector)) {
+						return prevElement;
+					}
+					return prevElement.querySelector(current.selector);
+			}
 		}
-		if (current.combinator === 'child') {
-			return root.querySelector(`:scope > ${current.selector}`);
-		} else if (current.combinator === 'descendant') {
-			return root.querySelector(`:scope ${current.selector}`);
-		} // todo sibling later
+
+		switch (current.combinator) {
+			case '>':
+				return prevElement.querySelector(`:scope > ${current.selector}`);
+			case '+':
+				{
+					let next = prevElement.nextElementSibling;
+					return next && next.matches(current.selector) ? next : null;
+				}
+			case '~':
+				{
+					let curr = prevElement.nextElementSibling;
+					while (curr) {
+						if (curr.matches(current.selector)) return curr;
+						curr = curr.nextElementSibling;
+					}
+					return null;
+				}
+			case ' ':
+			default:
+				return prevElement.querySelector(current.selector);
+		}
 	}
 
-	let found = findMatch(currentRoot);
+	let found = findMatch();
 	if (found) {
 		console.log(getElapsedTimestamp(), `[QD] Segment [${index}] found immediately:`, found);
-		handleSegmentFound(found, currentRoot, segments, index, callback, instance);
+		handleSegmentFound(found, prevElement, segments, index, callback, instance);
 		return;
 	}
 
 	// 2. Observe if not found yet
-	console.log(getElapsedTimestamp(), `[QD] Segment [${index}] not found yet. Setting up tree observer on root:`, currentRoot);
-	
-	let stateLabel = isLast 
-		? `observing tree for: ${current.selector}` 
-		: `observing tree for: ${current.selector}`;
-	
-	currentRoot.setAttribute('data-qd', stateLabel);
+	let observeRoot;
+	let observerOptions = { childList: true };
+
+	if (index === 0 && (current.combinator === '+' || current.combinator === '~')) {
+		observeRoot = prevElement.parentElement;
+	} else if (current.combinator === '+' || current.combinator === '~') {
+		observeRoot = prevElement.parentElement;
+	} else {
+		observeRoot = prevElement;
+		observerOptions.subtree = (current.combinator === ' ');
+	}
+
+	if (!observeRoot) {
+		console.warn(getElapsedTimestamp(), `[QD] Cannot observe element: root has no parentElement.`);
+		return;
+	}
+
+	console.log(getElapsedTimestamp(), `[QD] Segment [${index}] not found yet. Setting up tree observer on root:`, observeRoot);
+
+	let stateLabel = `observing tree for: ${current.selector}`;
+	observeRoot.setAttribute('data-qd', stateLabel);
 
 	let observer = new MutationObserver((mutations) => {
-		for (let mutation of mutations) {
-			for (let node of mutation.addedNodes) {
-				if (node.nodeType !== Node.ELEMENT_NODE) continue;
-
-				let match = null;
-				if (current.combinator === 'child') {
-					if (node.matches(current.selector) && node.parentElement === currentRoot) {
-						match = node;
-					} else {
-						match = node.querySelector(`:scope > ${current.selector}`);
-					}
-				} else {
-					if (node.matches(current.selector)) {
-						match = node;
-					} else {
-						match = node.querySelector(current.selector);
-					}
-				}
-
-				if (match) {
-					console.log(getElapsedTimestamp(), `[QD] Segment [${index}] matched via MutationObserver on node:`, node, '-> resolved match:', match);
-					observer.disconnect();
-					// Remove from instance tracking
-					instance.observers = instance.observers.filter(o => o !== observer);
-					handleSegmentFound(match, currentRoot, segments, index, callback, instance);
-					return;
-				}
-			}
+		let match = findMatch();
+		if (match) {
+			console.log(getElapsedTimestamp(), `[QD] Segment [${index}] matched via MutationObserver -> resolved match:`, match);
+			observer.disconnect();
+			// Remove from instance tracking
+			instance.observers = instance.observers.filter(o => o !== observer);
+			handleSegmentFound(match, prevElement, segments, index, callback, instance);
 		}
 	});
 
-	observer.observe(currentRoot, {
-		childList: true,
-		subtree: true
-	});
-
+	observer.observe(observeRoot, observerOptions);
 	instance.observers.push(observer);
 }
 
@@ -197,7 +217,7 @@ function setupPathGuards(element, parentRoot, segments, index, callback, instanc
 	let monitoredChild = element;
 
 	// Walk up the ancestry chain from element's parent all the way up to parentRoot
-	while (currentParent && currentParent !== parentRoot.parentElement) {
+	while (currentParent && parentRoot && currentParent !== parentRoot.parentElement) {
 		console.log(getElapsedTimestamp(), `[QD] Setting up standing guard (flat observer) on parent along path:`, currentParent);
 
 		// Mark current parent as standing guard with the updated vocabulary
