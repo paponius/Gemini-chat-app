@@ -61,7 +61,6 @@ function queryDynamic(complexSelector, callbackOrRoot, rootOrCallback) {
 }
 
 function parseSelectorSegments(selectorStr) {
-	if (selectorStr === '~ .cdk-overlay-popover > .cdk-overlay-pane > .container > gem-menu > gem-menu-item[data-test-id="response-details-button"]') { debugger; }
 	// Normalize spacing around combinators and filter out any empty tokens resulting from leading/trailing operators
 	let normalized = selectorStr.trim()
 		.replace(/\s*([>+~])\s*/g, ' $1 ')

@@ -13,21 +13,17 @@
  *   the same source files to be reused within WebExtensions.
  *
  * v3.0
- *
- * - XXX_PATH: Path to the script repository/source
- * - YYY: Optional description details or specific notes to edit
- * - ###: Prefix for optional directives (e.g., icons, matches, grants) as needed
  */
 
 // ==UserScript==
 // @name           Gemini Chat App Enhancer
 // @namespace      https://github.com/paponius/
-// @version        1.15
+// @version        1.20
 // @description    Adds a clean inline thinking level switcher for Gemini with automatic state detection and customizable visibility.
 // @author         papo
 // @license        CC BY-NC-SA 4.0
 // @match          https://gemini.google.com/*
-// @icon           https://www.google.com/s2/favicons?sz=64&domain=google.com
+// @icon           https://raw.githubusercontent.com/paponius/Gemini-chat-app/master/GM/gemini.ico
 // @run-at         document-idle
 // @grant          GM_registerMenuCommand
 // @grant          GM_getValue
