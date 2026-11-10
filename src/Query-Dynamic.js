@@ -1,7 +1,7 @@
 /**
  * Query-Dynamic.js
  * A lightweight DOM observation debug helper for monitoring delayed element lifecycles
- * with cascade recovery and visual debugging via data-qd attributes.
+ * with cascade recovery, incremental backoff fallback, and visual debugging via data-qd attributes.
  */
 
 // Helper for cleaner console logs: returns milliseconds since page load
@@ -9,82 +9,106 @@ function getElapsedTimestamp() {
 	return `+${performance.now().toFixed(2)}ms`;
 }
 
-// Global registry to track active query-dynamic instances and prevent duplicate runs across re-injections
+// Global registry to track active query-dynamic instances across re-injections
 window.__queryDynamicInstances = window.__queryDynamicInstances || {};
 
 // TEST
-// queryDynamic('body .chat-app chat-window-content .response-container .response-container-footer .more-menu-button-container', el => { console.log(getElapsedTimestamp(), '[QD] SUCCESS: Target element fully resolved:', el); });
+// (async () => { let el = await queryDynamic('body .chat-app chat-window-content .response-container .response-container-footer .more-menu-button-container'); console.log(getElapsedTimestamp(), '[QD] SUCCESS:', el); })();
 
-function queryDynamic(complexSelector, callbackOrRoot, rootOrCallback) {
-	// Support flexible argument ordering: (selector, callback, root) or (selector, root, callback)
-	let callback = typeof callbackOrRoot === 'function' ? callbackOrRoot : rootOrCallback;
-	let rootInput = typeof callbackOrRoot === 'function' ? rootOrCallback : callbackOrRoot;
+function queryDynamic(complexSelector, rootInput = document.body, fallBackTimeout = 10) {
+	return new Promise((resolve) => {
+		// Support flexible argument ordering: (selector, root) or (selector, timeout)
+		let rootElement = document.body;
+		let timeoutVal = fallBackTimeout;
 
-	let rootElement = document.body;
-	if (rootInput) {
-		rootElement = typeof rootInput === 'string' ? document.querySelector(rootInput) : rootInput;
-		if (!rootElement) {
-			console.warn(getElapsedTimestamp(), '[QD] ERROR: Provided root element/selector not found in DOM:', rootInput);
-			rootElement = document.body;
+		if (rootInput) {
+			if (typeof rootInput === 'number') {
+				timeoutVal = rootInput;
+			} else {
+				rootElement = typeof rootInput === 'string' ? document.querySelector(rootInput) : rootInput;
+				if (!rootElement) {
+					console.warn(getElapsedTimestamp(), '[QD] ERROR: Provided root element/selector not found in DOM:', rootInput);
+					rootElement = document.body;
+				}
+			}
 		}
-	}
 
-	console.log(getElapsedTimestamp(), '[QD] Initializing queryDynamic with selector:', complexSelector, 'on root:', rootElement);
+		console.log(getElapsedTimestamp(), '[QD] Initializing queryDynamic with selector:', complexSelector, 'on root:', rootElement);
 
-	// Run-once / Deduplication check: Prevent multiple concurrent runs for the exact same selector
-	if (window.__queryDynamicInstances[complexSelector]) {
-		console.warn(getElapsedTimestamp(), '[QD] queryDynamic already running for this selector. Cleaning up previous instance.');
-		window.__queryDynamicInstances[complexSelector].cleanup();
-	}
+		// Instance control object for cleanup
+		var instance = {
+			observers: [],
+			timers: [],
+			rootElement: rootElement,
+			cleanup() {
+				this.observers.forEach(obs => obs.disconnect());
+				this.observers = [];
+				this.timers.forEach(t => clearTimeout(t));
+				this.timers = [];
+			}
+		};
+		window.__queryDynamicInstances[complexSelector] = instance;
 
-	// Instance control object for cleanup
-	var instance = {
-		observers: [],
-		rootElement: rootElement,
-		cleanup() {
-			this.observers.forEach(obs => obs.disconnect());
-			this.observers = [];
+		// Decompose the complex selector into sequential simple segments.
+		// Example: " > .b" or ".a + .b ~ .c > .target"
+		let segments = parseSelectorSegments(complexSelector);
+		console.log(getElapsedTimestamp(), '[QD] Parsed segments:', segments);
+		if (segments.length === 0) {
+			console.warn(getElapsedTimestamp(), '[QD] ERROR: No valid segments parsed from selector.');
+			resolve(null);
+			return;
 		}
-	};
-	window.__queryDynamicInstances[complexSelector] = instance;
 
-	// Decompose the complex selector into sequential simple segments.
-	// Example: " > .b" or ".a + .b ~ .c > .target"
-	let segments = parseSelectorSegments(complexSelector);
-	console.log(getElapsedTimestamp(), '[QD] Parsed segments:', segments);
-	if (segments.length === 0) {
-		console.warn(getElapsedTimestamp(), '[QD] ERROR: No valid segments parsed from selector.');
-		return;
-	}
-
-	resolveSegment(rootElement, segments, 0, callback, instance);
+		resolveSegment(rootElement, segments, 0, (element) => {
+			resolve(element);
+		}, () => {
+			resolve(null);
+		}, instance, timeoutVal);
+	});
 }
 
 function parseSelectorSegments(selectorStr) {
-	// Normalize spacing around combinators and filter out any empty tokens resulting from leading/trailing operators
-	let normalized = selectorStr.trim()
-		.replace(/\s*([>+~])\s*/g, ' $1 ')
-		.replace(/\s+/g, ' ');
-	let tokens = normalized.split(' ').filter(Boolean);
 	let segments = [];
+	let currentToken = '';
 	let pendingCombinator = ' ';
+	let depth = 0;
 
-	for (let i = 0; i < tokens.length; i++) {
-		let token = tokens[i];
+	// Traverse character by character to respect parentheses and brackets inside selectors (e.g. :is(...))
+	for (let i = 0; i < selectorStr.length; i++) {
+		let char = selectorStr[i];
 
-		if (token === '>' || token === '+' || token === '~') {
-			pendingCombinator = token;
+		if (char === '(' || char === '[') depth++;
+		if (char === ')' || char === ']') depth--;
+
+		if (depth === 0 && (char === '>' || char === '+' || char === '~')) {
+			if (currentToken.trim()) {
+				segments.push({ selector: currentToken.trim(), combinator: pendingCombinator });
+				currentToken = '';
+			}
+			pendingCombinator = char;
 			continue;
 		}
 
-		segments.push({ selector: token, combinator: pendingCombinator });
-		pendingCombinator = ' ';
+		if (depth === 0 && /\s/.test(char)) {
+			if (currentToken.trim()) {
+				segments.push({ selector: currentToken.trim(), combinator: pendingCombinator });
+				currentToken = '';
+				pendingCombinator = ' ';
+			}
+			continue;
+		}
+
+		currentToken += char;
+	}
+
+	if (currentToken.trim()) {
+		segments.push({ selector: currentToken.trim(), combinator: pendingCombinator });
 	}
 
 	return segments;
 }
 
-function resolveSegment(prevElement, segments, index, callback, instance) {
+function resolveSegment(prevElement, segments, index, successResolve, failureResolve, instance, fallBackTimeout) {
 	let current = segments[index];
 	let isLast = index === segments.length - 1;
 
@@ -148,7 +172,7 @@ function resolveSegment(prevElement, segments, index, callback, instance) {
 	let found = findMatch();
 	if (found) {
 		console.log(getElapsedTimestamp(), `[QD] Segment [${index}] found immediately:`, found);
-		handleSegmentFound(found, prevElement, segments, index, callback, instance);
+		handleSegmentFound(found, prevElement, segments, index, successResolve, failureResolve, instance, fallBackTimeout);
 		return;
 	}
 
@@ -167,6 +191,7 @@ function resolveSegment(prevElement, segments, index, callback, instance) {
 
 	if (!observeRoot) {
 		console.warn(getElapsedTimestamp(), `[QD] Cannot observe element: root has no parentElement.`);
+		failureResolve();
 		return;
 	}
 
@@ -175,42 +200,87 @@ function resolveSegment(prevElement, segments, index, callback, instance) {
 	let stateLabel = `observing tree for: ${current.selector}`;
 	observeRoot.setAttribute('data-qd', stateLabel);
 
+	let resolved = false;
+
 	let observer = new MutationObserver((mutations) => {
+		console.debug(getElapsedTimestamp(), `[QD] Mutation fired on root for segment [${index}]`, { mutations, observeRoot });
+		if (resolved) return;
 		let match = findMatch();
 		if (match) {
+			resolved = true;
 			console.log(getElapsedTimestamp(), `[QD] Segment [${index}] matched via MutationObserver -> resolved match:`, match);
-			observer.disconnect();
 			// Remove from instance tracking
-			instance.observers = instance.observers.filter(o => o !== observer);
-			handleSegmentFound(match, prevElement, segments, index, callback, instance);
+			instance.cleanup();
+			handleSegmentFound(match, prevElement, segments, index, successResolve, failureResolve, instance, fallBackTimeout);
 		}
 	});
 
 	observer.observe(observeRoot, observerOptions);
 	instance.observers.push(observer);
+
+	// Fallback polling with proportional schedule where fallBackTimeout is the max ceiling (in seconds)
+	if (fallBackTimeout) {
+		const maxMs = (typeof fallBackTimeout === 'number' ? fallBackTimeout : 10) * 1000;
+		const firstMs = Math.min(Math.max(maxMs * 0.1, 200), 2000); // Proportional first check (10% of max, bounded between 200ms and 2s)
+
+		let delays = [];
+		let currentDelay = firstMs;
+		while (currentDelay < maxMs) {
+			delays.push(Math.round(currentDelay));
+			currentDelay *= 2;
+		}
+		delays.push(maxMs); // Ensures the final attempt hits the exact max timeout ceiling
+
+		let attempt = 0;
+
+		let runFallback = () => {
+			if (resolved) return;
+			let match = findMatch();
+			if (match) {
+				resolved = true;
+				console.warn(getElapsedTimestamp(), `[QD] WARNING: MutationObserver missed segment [${index}], but fallback polling successfully resolved match:`, match);
+				instance.cleanup();
+				handleSegmentFound(match, prevElement, segments, index, successResolve, failureResolve, instance, fallBackTimeout);
+				return;
+			}
+
+			attempt++;
+			if (attempt < delays.length) {
+				let timer = setTimeout(runFallback, delays[attempt]);
+				instance.timers.push(timer);
+			} else {
+				console.error(getElapsedTimestamp(), `[QD] ERROR: Failed to resolve segment [${index}] ("${current.selector}") after exhausting all incremental fallback retries (${fallBackTimeout}s total ceiling).`);
+				instance.cleanup();
+				failureResolve();
+			}
+		};
+
+		let initialTimer = setTimeout(runFallback, delays[0]);
+		instance.timers.push(initialTimer);
+	}
 }
 
-function handleSegmentFound(element, parentRoot, segments, index, callback, instance) {
+function handleSegmentFound(element, parentRoot, segments, index, successResolve, failureResolve, instance, fallBackTimeout) {
 	var isLast = index === segments.length - 1;
 
 	// Set up flat standing guards on every parent/ancestor along the entire path up to parentRoot
-	setupPathGuards(element, parentRoot, segments, index, callback, instance);
+	setupPathGuards(element, parentRoot, segments, index, successResolve, failureResolve, instance, fallBackTimeout);
 
 	if (isLast) {
 		console.log(getElapsedTimestamp(), '[QD] SUCCESS: Final target element resolved successfully:', element);
 		// Mark final element as handled
 		element.setAttribute('data-qd', 'handled');
 		
-		callback(element);
+		successResolve(element);
 	} else {
 		console.log(getElapsedTimestamp(), `[QD] Intermediate segment [${index}] resolved. Setting path guards and proceeding to next segment.`);
 		
 		// Proceed to next segment
-		resolveSegment(element, segments, index + 1, callback, instance);
+		resolveSegment(element, segments, index + 1, successResolve, failureResolve, instance, fallBackTimeout);
 	}
 }
 
-function setupPathGuards(element, parentRoot, segments, index, callback, instance) {
+function setupPathGuards(element, parentRoot, segments, index, successResolve, failureResolve, instance, fallBackTimeout) {
 	let currentParent = element.parentElement;
 	let targetSelector = segments[index].selector;
 	let monitoredChild = element;
@@ -241,10 +311,10 @@ function setupPathGuards(element, parentRoot, segments, index, callback, instanc
 						
 						if (!fallbackRoot) {
 							console.log(getElapsedTimestamp(), '[QD] Cascade Recovery: No data-qd ancestor found. Falling back to instance rootElement and restarting from index 0.');
-							resolveSegment(instance.rootElement, segments, 0, callback, instance);
+							resolveSegment(instance.rootElement, segments, 0, successResolve, failureResolve, instance, fallBackTimeout);
 						} else {
 							console.log(getElapsedTimestamp(), '[QD] Cascade Recovery: Found surviving ancestor with data-qd:', fallbackRoot);
-							resolveSegment(fallbackRoot, segments, index, callback, instance);
+							resolveSegment(fallbackRoot, segments, index, successResolve, failureResolve, instance, fallBackTimeout);
 						}
 						return;
 					}

@@ -18,8 +18,8 @@
 // ==UserScript==
 // @name           Gemini Chat App Enhancer
 // @namespace      https://github.com/paponius/
-// @version        1.20
-// @description    Adds a clean inline thinking level switcher for Gemini with automatic state detection and customizable visibility.
+// @version        1.21
+// @description    Tweaks the Gemini Chat App
 // @author         papo
 // @license        CC BY-NC-SA 4.0
 // @match          https://gemini.google.com/*

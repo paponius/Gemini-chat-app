@@ -1,6 +1,8 @@
-// ==========================================
-// Gemini-Model-Used-Badge
-// ==========================================
+/* ==========================================
+ * Gemini-Model-Badge (GMB)
+ * Automatically tracks and displays the model used for each Gemini response.
+ * ==========================================
+ */
 
 (function() {
 	'use strict';
@@ -40,7 +42,7 @@
 	var processingQueue = [];
 
 	function initChatHistoryObserver(rootElement) {
-		console.log('[GCA model-used] Initializing chat history observer for root element:', rootElement);
+		console.log('[GMB] Initializing chat history observer for root element:', rootElement);
 
 		// Function to check and queue conversation containers anywhere within the root or added subtree
 		function checkContainers(target = rootElement) {
@@ -56,7 +58,7 @@
 			containers.forEach(container => queueContainer(container));
 		}
 
-		function queueContainer(container) {
+		async function queueContainer(container) {
 			/* checks if `.response-container-footer .menu-button-wrapper gem-icon-button` is present
 			in found element. if not, queryDynamic() will be used.
 			the found element will be added to processingQueue now only if there are all necessary elements in it
@@ -66,19 +68,18 @@
 			const menuButton = container.querySelector('.response-container-footer .menu-button-wrapper gem-icon-button');
 			if (menuButton) {
 				container.setAttribute('data-gls-processed', 'queued');
-				console.log('[GCA model-used] Queued new conversation container for processing:', container);
+				console.log('[GMB] Queued new conversation container for processing:', container);
 				processingQueue.push({ container, menuButton });
 				processQueue();
 			} else {
-				console.warn('[GCA model-used] Menu button not yet present in newly added container, waiting via queryDynamic:', container);
-				queryDynamic('.response-container-footer .menu-button-wrapper gem-icon-button', resolvedMenuButton => {
-					if (!container.hasAttribute('data-gls-processed')) {
+				console.warn('[GMB] Menu button not yet present in newly added container, waiting via queryDynamic:', container);
+				const resolvedMenuButton = await queryDynamic('.response-container-footer .menu-button-wrapper gem-icon-button', container, 10);
+				if (resolvedMenuButton && !container.hasAttribute('data-gls-processed')) {
 						container.setAttribute('data-gls-processed', 'queued');
-						console.log('[GCA model-used] Queued new conversation container for processing:', container);
+					console.log('[GMB] Queued new conversation container for processing:', container);
 						processingQueue.push({ container, menuButton: resolvedMenuButton });
 						processQueue();
 					}
-				}, container);
 			}
 		}
 
@@ -102,25 +103,25 @@
 	async function processQueue() {
 		if (isProcessingQueue) return;
 		isProcessingQueue = true;
-		console.log('[GCA model-used] processQueue() started. Current queue length:', processingQueue.length);
+		console.log('[GMB] processQueue() started. Current queue length:', processingQueue.length);
 
 		try {
 			while (processingQueue.length > 0) {
 				const item = processingQueue.shift();
 				const container = item.container;
 				if (!document.body.contains(container)) {
-					console.log('[GCA model-used] Container is no longer attached to document DOM, skipping.');
+					console.log('[GMB] Container is no longer attached to document DOM, skipping.');
 					continue;
 				}
 				
 				container.setAttribute('data-gls-processed', 'processing');
-				console.log('[GCA model-used] Processing container:', container);
+				console.log('[GMB] Processing container:', container);
 				try {
 					await processSingleResponseContainer(item);
 					container.setAttribute('data-gls-processed', 'true');
-					console.log('[GCA model-used] Successfully processed and marked container as true.');
+					console.log('[GMB] Successfully processed and marked container as true.');
 				} catch (err) {
-					console.error('[GCA model-used] Error processing response container:', err);
+					console.error('[GMB] Error processing response container:', err);
 					container.removeAttribute('data-gls-processed');
 				} finally {
 					// Ensure UI suppression class is cleaned up even if an error occurs
@@ -132,7 +133,7 @@
 		} finally {
 			isProcessingQueue = false;
 			document.body.classList.remove('gls-hide-ui');
-			console.log('[GCA model-used] processQueue() completed. Queue empty.');
+			console.log('[GMB] processQueue() completed. Queue empty.');
 		}
 	}
 
@@ -151,38 +152,30 @@
 			await new Promise(r => setTimeout(r, 50));
 		}
 
-		console.log('[GCA model-used] Found menu button. Clicking to open first popup menu...');
+		console.log('[GMB] Found menu button. Clicking to open first popup menu...');
 
 		// 1. Click the first popup menu trigger button
 		menuButton.click();
 
-		// 2. Wait for the first popup menu containing [data-test-id="response-details-button"] to appear
-		const detailsMenuItem = await new Promise(resolve => {
-			queryDynamic('~ .cdk-overlay-popover > .cdk-overlay-pane > .container > gem-menu > gem-menu-item[data-test-id="response-details-button"]', menuButton, item => {
-				resolve(item);
-			});
-		});
+		// 2. Wait for the first popup menu containing "details" button to appear
+		const detailsMenuItem = await queryDynamic('~ .cdk-overlay-popover > .cdk-overlay-pane > .container > gem-menu > gem-menu-item:is([value="thoughts"], [data-test-id="response-details-button"], [data-test-id="thinking-steps-button"])', menuButton, 10);
 
 		if (!detailsMenuItem) {
-			console.error('[GCA model-used] Response details menu item ([data-test-id="response-details-button"]) not found.');
+			console.error('[GMB] Response details menu item ("details" button) not found.');
 			document.body.click(); // Close any open menu
 			document.body.classList.remove('gls-hide-ui');
 			return;
 		}
-		console.log('[GCA model-used] Found response details menu item. Clicking...');
+		console.log('[GMB] Found response details menu item. Clicking...');
 
 		// 3. Click the "See response details" menu item to open the second popup/sidebar
 		detailsMenuItem.click();
 
 		// 4. Wait for the sidebar container and [data-test-id="model-line"] to appear
-		const modelLine = await new Promise(resolve => {
-			queryDynamic('.content-container context-sidebar > .container > .feature-container > .ng-star-inserted > .thought-summary > [data-test-id="model-line"]', line => {
-				resolve(line);
-			});
-		});
+		const modelLine = await queryDynamic('.content-container context-sidebar > .container > .feature-container > .ng-star-inserted > .thought-summary > [data-test-id="model-line"]', document.body, 10);
 
 		if (!modelLine) {
-			console.error('[GCA model-used] Model line element ([data-test-id="model-line"]) not found in sidebar.');
+			console.error('[GMB] Model line element ([data-test-id="model-line"]) not found in sidebar.');
 			let btnCloseErr = document.querySelector('context-sidebar button.close-button, context-sidebar .close-button');
 			if (btnCloseErr) btnCloseErr.click();
 			document.body.classList.remove('gls-hide-ui');
@@ -190,17 +183,17 @@
 		}
 
 		const modelText = modelLine.textContent.trim();
-		console.log('[GCA model-used] Successfully extracted model line text:', modelText);
+		console.log('[GMB] Successfully extracted model line text:', modelText);
 
 		// 5. Close the sidebar by clicking on .close-button inside <context-sidebar>
 		var elSidebar = document.querySelector('context-sidebar');
 		var btnClose = elSidebar ? elSidebar.querySelector(':scope button.close-button, :scope .close-button') : null;
 
 		if (btnClose) {
-			console.log('[GCA model-used] Closing sidebar via close button...');
+			console.log('[GMB] Closing sidebar via close button...');
 			btnClose.click();
 		} else {
-			console.log('[GCA model-used] Sidebar close button not found, clicking document body...');
+			console.log('[GMB] Sidebar close button not found, clicking document body...');
 			document.body.click();
 		}
 
@@ -248,14 +241,22 @@
 			badge.className = 'gls-model-badge';
 			badge.textContent = modelText;
 			buttonsContainer.appendChild(badge);
-			console.log('[GCA model-used] Injected model badge into buttons container:', badge);
+			console.log('[GMB] Injected model badge into buttons container:', badge);
 		} else {
-			console.log('[GCA model-used] Buttons container not found or badge already present.');
+			console.log('[GMB] Buttons container not found or badge already present.');
 		}
 	}
 
 	injectStyles();
 	// 	console.log('[GCA model-used] Initializing chat history observer timer triggered.');
-	queryDynamic('.chat-app .content-container infinite-scroller.chat-history', initChatHistoryObserver);
+	// Initialize main chat history observer using queryDynamic with Promise support
+	(async () => {
+		const chatHistoryEl = await queryDynamic('.chat-app .content-container infinite-scroller.chat-history', document.body, 15);
+		if (chatHistoryEl) {
+			initChatHistoryObserver(chatHistoryEl);
+		} else {
+			console.error('[GMB] Failed to locate chat history container.');
+		}
+	})();
 
 })();
